@@ -1,0 +1,94 @@
+graph TD
+    %% ---------------------------------------------------------
+    %% PRODUCTION ANALYTICS PLATFORM ARCHITECTURE
+    %% ---------------------------------------------------------
+
+    subgraph INGESTION["1. INGESTION & DATA CONTRACTS LAYER"]
+        S1["Telephony Feeds (Calls, Attempts, Dispositions)"]
+        S2["Banking Gateway (Payments, Reversals, Status)"]
+        S3["Digital Events (WhatsApp, SMS Delivery & Reads)"]
+        S4["Core LMS (Accounts, Delinquency DPD, Status History)"]
+        S5["Operational Logs (Agent Sessions, Campaigns, Complaints)"]
+
+        CONTRACTS["Data Contract Validation Engine (Great Expectations / Pydantic)"]
+        S1 --> CONTRACTS
+        S2 --> CONTRACTS
+        S3 --> CONTRACTS
+        S4 --> CONTRACTS
+        S5 --> CONTRACTS
+    end
+
+    subgraph STAGING["2. STAGING & ISOLATION LAYER (Parquet / S3 Lakehouse)"]
+        RAW_VALID["Raw Validated Events (Bronze Tier)"]
+        QUARANTINE["Quarantine Audit Ledger (Dead-Letter Queue / Schema Violations)"]
+        
+        CONTRACTS -->|Pass Schema & Types| RAW_VALID
+        CONTRACTS -->|Fail Key / Type Checks| QUARANTINE
+    end
+
+    subgraph PROCESSING["3. CANONICAL TRANSFORMATION & RECONCILIATION LAYER (DuckDB / dbt)"]
+        DEDUP["Idempotent Deduplication Engine (Multi-Window Cash & Event Dedup)"]
+        TZ_NORM["Timezone Normalization (UTC / Gulf -> IST Asia/Kolkata)"]
+        ENTITY_RES["Entity Resolution & Surrogate Key Generation (borrower_sk, Canonical Desks)"]
+        ATTR_ENGINE["Multi-Touch Attribution Engine (7d/14d Last-Touch & Tie-Breaking)"]
+
+        RAW_VALID --> DEDUP
+        DEDUP --> TZ_NORM
+        TZ_NORM --> ENTITY_RES
+        ENTITY_RES --> ATTR_ENGINE
+    end
+
+    subgraph GOLDEN_MARTS["4. GOLDEN ANALYTICAL MARTS (Silver / Gold Tier)"]
+        DIM_ACCOUNTS["dim_accounts (Delinquency, Principal, Loan Type)"]
+        DIM_DESKS["dim_desks (Canonical Desk Capacity, Sessions - ASM-009)"]
+        FCT_PAYMENTS["fct_payments (Net Realized Cash, Status Exclusion)"]
+        FCT_TOUCHPOINTS["fct_touchpoints (Unified Calls, WA, SMS, Field Lineage)"]
+        FCT_COMPLAINTS["fct_complaints (Proximity Linked to Desk Codes)"]
+
+        ATTR_ENGINE --> DIM_ACCOUNTS
+        ATTR_ENGINE --> DIM_DESKS
+        ATTR_ENGINE --> FCT_PAYMENTS
+        ATTR_ENGINE --> FCT_TOUCHPOINTS
+        ATTR_ENGINE --> FCT_COMPLAINTS
+    end
+
+    subgraph INTELLIGENCE["5. INTELLIGENT TARGETING & ML ENGINE (Winning Lever)"]
+        PROPENSITY["Borrower Propensity Scoring Model (Self-Cure vs Actionable)"]
+        CAMPAIGN_ROUTER["Campaign Routing & Leakage Guardrails (Enforce DPD>=60 Rules)"]
+        ARBITRATION["Channel Arbitration Engine (Voice vs WhatsApp vs SMS)"]
+
+        DIM_ACCOUNTS --> PROPENSITY
+        FCT_PAYMENTS --> PROPENSITY
+        FCT_TOUCHPOINTS --> PROPENSITY
+        PROPENSITY --> CAMPAIGN_ROUTER
+        CAMPAIGN_ROUTER --> ARBITRATION
+        ARBITRATION -->|Targeting Feed| S1
+        ARBITRATION -->|Targeting Feed| S3
+    end
+
+    subgraph CONSUMPTION["6. C-SUITE CONSUMPTION & GOVERNANCE LAYER"]
+        STREAMLIT["Streamlit Executive Dashboard (60-Sec C-Suite Cockpit)"]
+        KPI_ENGINE["Daily Financial Recovery & KPI Engine (Net Realized Cash, RPC)"]
+        CONDUCT_MONITOR["Regulatory Conduct & Complaints Risk Tracker (713 Desk Codes)"]
+
+        FCT_PAYMENTS --> KPI_ENGINE
+        FCT_TOUCHPOINTS --> KPI_ENGINE
+        FCT_COMPLAINTS --> CONDUCT_MONITOR
+        KPI_ENGINE --> STREAMLIT
+        CONDUCT_MONITOR --> STREAMLIT
+    end
+
+    %% Styling
+    classDef ingestion fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
+    classDef staging fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100;
+    classDef processing fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#4a148c;
+    classDef marts fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,color:#1b5e20;
+    classDef intelligence fill:#fce4ec,stroke:#880e4f,stroke-width:2px,color:#880e4f;
+    classDef consumption fill:#e0f2f1,stroke:#004d40,stroke-width:2px,color:#004d40;
+
+    class S1,S2,S3,S4,S5,CONTRACTS ingestion;
+    class RAW_VALID,QUARANTINE staging;
+    class DEDUP,TZ_NORM,ENTITY_RES,ATTR_ENGINE processing;
+    class DIM_ACCOUNTS,DIM_DESKS,FCT_PAYMENTS,FCT_TOUCHPOINTS,FCT_COMPLAINTS marts;
+    class PROPENSITY,CAMPAIGN_ROUTER,ARBITRATION intelligence;
+    class STREAMLIT,KPI_ENGINE,CONDUCT_MONITOR consumption;
